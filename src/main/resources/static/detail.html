@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>图纸详情</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: -apple-system, "Microsoft YaHei", sans-serif; background: #f0f2f5; color: #333; padding: 20px; }
+        .container { max-width: 1100px; margin: 0 auto; }
+
+        /* 顶部导航 */
+        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; padding: 16px 20px; background: #fff; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,.1); }
+        .header h1 { font-size: 20px; color: #1a1a1a; }
+        .header .back { color: #1890ff; text-decoration: none; font-size: 14px; }
+        .header .back:hover { text-decoration: underline; }
+
+        /* 选项卡 */
+        .tabs { display: flex; gap: 0; background: #fff; border-radius: 8px 8px 0 0; box-shadow: 0 1px 3px rgba(0,0,0,.1); overflow: hidden; }
+        .tab { flex: 1; padding: 14px 20px; cursor: pointer; text-align: center; font-size: 14px; color: #666; background: #fafafa; border-bottom: 3px solid transparent; transition: all .2s; }
+        .tab:hover { color: #1890ff; background: #f0f8ff; }
+        .tab.active { color: #1890ff; background: #fff; border-bottom-color: #1890ff; font-weight: 600; }
+
+        .tab-content { background: #fff; border-radius: 0 0 8px 8px; box-shadow: 0 1px 3px rgba(0,0,0,.1); padding: 0; min-height: 200px; }
+
+        /* ====== 关键信息表格 ====== */
+        .info-grid { width: 100%; border-collapse: collapse; }
+        .info-grid th { background: #e6f7ff; color: #1890ff; font-weight: 600; padding: 12px 16px; text-align: left; border: 1px solid #d9ebf5; font-size: 13px; width: 140px; white-space: nowrap; }
+        .info-grid td { padding: 12px 16px; border: 1px solid #e8e8e8; font-size: 13px; color: #1a1a1a; }
+        .info-grid td.empty { color: #bbb; font-style: italic; }
+        .info-grid tr:hover td { background: #fafafa; }
+
+        /* 明细表格 */
+        .detail-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        .detail-table th { background: #fafafa; color: #555; font-weight: 600; padding: 10px 14px; border: 1px solid #e8e8e8; text-align: left; white-space: nowrap; }
+        .detail-table td { padding: 10px 14px; border: 1px solid #e8e8e8; color: #333; }
+        .detail-table tr:hover td { background: #f5f9ff; }
+        .detail-table .key-col { color: #1890ff; font-weight: 500; white-space: nowrap; }
+        .detail-table .page-col { color: #888; }
+        .detail-table .source-col { font-size: 12px; }
+        .source-badge { display: inline-block; padding: 2px 8px; border-radius: 3px; font-size: 11px; }
+        .source-badge.text { background: #e6f7ff; color: #1890ff; }
+        .source-badge.table { background: #f6ffed; color: #52c41a; }
+        .source-badge.ocr { background: #fffbe6; color: #faad14; }
+        .source-badge.spatial { background: #f9f0ff; color: #722ed1; }
+        .conf-low { color: #faad14; font-size: 11px; }
+
+        /* 原始内容 */
+        .content-item { padding: 16px 20px; border-bottom: 1px solid #f0f0f0; }
+        .content-item:last-child { border-bottom: none; }
+        .content-item .meta { font-size: 12px; color: #888; margin-bottom: 8px; display: flex; gap: 16px; align-items: center; }
+        .content-item pre { white-space: pre-wrap; word-break: break-all; font-size: 12px; line-height: 1.7; background: #fafafa; padding: 12px; border-radius: 4px; max-height: 300px; overflow-y: auto; }
+        table.data-table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 4px; }
+        table.data-table th { background: #e6f7ff; padding: 8px 10px; border: 1px solid #d9d9d9; font-weight: 600; color: #1890ff; }
+        table.data-table td { padding: 8px 10px; border: 1px solid #d9d9d9; }
+
+        /* 通用 */
+        .empty { text-align: center; padding: 40px; color: #bbb; font-size: 14px; }
+        .loading { text-align: center; padding: 40px; color: #1890ff; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .spinner { display: inline-block; width: 20px; height: 20px; border: 2px solid #eee; border-top-color: #1890ff; border-radius: 50%; animation: spin .6s linear infinite; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="header">
+        <h1 id="doc-title">图纸详情</h1>
+        <a href="index.html" class="back">返回列表</a>
+    </div>
+
+    <!-- 选项卡 -->
+    <div class="tabs">
+        <div class="tab active" data-tab="summary" onclick="switchTab('summary')">关键信息汇总</div>
+        <div class="tab" data-tab="detail" onclick="switchTab('detail')">关键信息明细</div>
+        <div class="tab" data-tab="content" onclick="switchTab('content')">原始内容</div>
+    </div>
+    <div class="tab-content">
+        <div id="tab-summary"><div class="loading"><span class="spinner"></span> 加载中...</div></div>
+        <div id="tab-detail" style="display:none;"><div class="loading"><span class="spinner"></span></div></div>
+        <div id="tab-content" style="display:none;"><div class="loading"><span class="spinner"></span></div></div>
+    </div>
+</div>
+
+<script>
+const BASE = '';
+const docId = new URLSearchParams(location.search).get('id');
+if (!docId) location.href = 'index.html';
+
+// 加载文档信息
+async function loadDoc() {
+    try {
+        const res = await fetch(BASE + '/api/v1/documents');
+        const docs = await res.json();
+        const doc = docs.find(d => d.id == docId);
+        if (doc) {
+            document.getElementById('doc-title').textContent = doc.fileName || '图纸详情';
+            document.title = doc.fileName || '图纸详情';
+        }
+    } catch {}
+}
+
+// 加载关键信息
+async function loadKeyValues() {
+    const summaryContainer = document.getElementById('tab-summary');
+    const detailContainer = document.getElementById('tab-detail');
+
+    try {
+        const res = await fetch(BASE + '/api/v1/key-values/' + docId);
+        const data = await res.json();
+        const kvs = data.key_values || {};
+
+        if (!Object.keys(kvs).length) {
+            summaryContainer.innerHTML = '<div class="empty">未提取到关键信息</div>';
+            detailContainer.innerHTML = '<div class="empty">无数据</div>';
+            return;
+        }
+
+        // ===== 汇总表格：每个关键字取第一个值，2列布局 =====
+        const keys = Object.entries(kvs);
+        let summaryHtml = '<table class="info-grid"><colgroup><col style="width:160px"><col><col style="width:160px"><col></colgroup>';
+        for (let i = 0; i < keys.length; i += 2) {
+            const [k1, vs1] = keys[i];
+            const v1 = vs1[0];
+            summaryHtml += '<tr>';
+            summaryHtml += `<th>${e(k1)}</th><td${!v1?.value ? ' class="empty"' : ''}>${e(v1?.value || '-')}</td>`;
+
+            if (i + 1 < keys.length) {
+                const [k2, vs2] = keys[i + 1];
+                const v2 = vs2[0];
+                summaryHtml += `<th>${e(k2)}</th><td${!v2?.value ? ' class="empty"' : ''}>${e(v2?.value || '-')}</td>`;
+            } else {
+                summaryHtml += '<th></th><td></td>';
+            }
+            summaryHtml += '</tr>';
+        }
+        summaryHtml += '</table>';
+        summaryContainer.innerHTML = summaryHtml;
+
+        // ===== 明细表格 =====
+        let detailHtml = '<table class="detail-table"><thead><tr><th style="width:140px">关键字</th><th>值</th><th style="width:70px">来源</th><th style="width:60px">页码</th><th style="width:80px">置信度</th></tr></thead><tbody>';
+
+        for (const [key, values] of Object.entries(kvs)) {
+            // 去重
+            const seen = new Set();
+            const unique = values.filter(v => {
+                const sig = v.value;
+                if (seen.has(sig)) return false;
+                seen.add(sig);
+                return true;
+            });
+
+            unique.forEach((v, idx) => {
+                const srcMap = { 'table': '表格', 'text': '文本', 'ocr_spatial': '空间' };
+                const srcCls = v.source === 'table' ? 'table' : (v.source === 'ocr_spatial' ? 'spatial' : (v.confidence && v.confidence < 100 ? 'ocr' : 'text'));
+                detailHtml += '<tr>';
+                if (idx === 0) {
+                    detailHtml += `<td class="key-col" rowspan="${unique.length}">${e(key)}</td>`;
+                }
+                detailHtml += `<td>${e(v.value || '-')}</td>`;
+                detailHtml += `<td class="source-col"><span class="source-badge ${srcCls}">${srcMap[v.source] || v.source}</span></td>`;
+                detailHtml += `<td class="page-col">${v.page || '-'}</td>`;
+                detailHtml += `<td>${v.confidence != null ? (v.confidence < 100 ? `<span class="conf-low">${v.confidence}%</span>` : v.confidence + '%') : '-'}</td>`;
+                detailHtml += '</tr>';
+            });
+        }
+        detailHtml += '</tbody></table>';
+        detailContainer.innerHTML = detailHtml;
+
+    } catch (err) {
+        summaryContainer.innerHTML = '<div class="empty">加载失败</div>';
+        detailContainer.innerHTML = '<div class="empty">加载失败</div>';
+    }
+}
+
+// 加载原始内容
+async function loadContent() {
+    const container = document.getElementById('tab-content');
+    try {
+        const res = await fetch(BASE + '/api/v1/content/' + docId);
+        let contents = await res.json();
+        contents = contents.filter(c => c.content_type !== 'key_value');
+        if (!contents.length) {
+            container.innerHTML = '<div class="empty">无内容</div>';
+            return;
+        }
+
+        let html = '';
+        contents.forEach(c => {
+            const isTable = c.content_type === 'table';
+            const isOCR = c.confidence && c.confidence < 100;
+            let label = isTable ? '表格' : (isOCR ? 'OCR识别' : '文本');
+            const srcBadge = isTable ? 'table' : (isOCR ? 'ocr' : 'text');
+
+            html += `<div class="content-item">
+                <div class="meta">
+                    <span class="source-badge ${srcBadge}">${label}</span>
+                    <span>第${c.page_num || '?'}页</span>
+                    ${isOCR ? `<span>置信度 ${c.confidence}%</span>` : ''}
+                </div>`;
+
+            if (isTable && c.table_data) {
+                html += renderTable(c.table_data);
+            } else {
+                html += `<pre>${e(c.content_text || '')}</pre>`;
+            }
+            html += '</div>';
+        });
+        container.innerHTML = html;
+    } catch {
+        container.innerHTML = '<div class="empty">加载失败</div>';
+    }
+}
+
+function renderTable(td) {
+    const headers = td.headers || [];
+    const rows = td.rows || [];
+    if (!headers.length && !rows.length) return '<div class="empty">空表格</div>';
+    let h = '<table class="data-table">';
+    if (headers.length) {
+        h += '<thead><tr>' + headers.map(x => '<th>' + e(x) + '</th>').join('') + '</tr></thead>';
+    }
+    if (rows.length) {
+        h += '<tbody>';
+        rows.forEach(r => {
+            h += '<tr>' + (Array.isArray(r) ? r : [r]).map(x => '<td>' + e(x) + '</td>').join('') + '</tr>';
+        });
+        h += '</tbody>';
+    }
+    return h + '</table>';
+}
+
+function switchTab(tab) {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelector(`.tab[data-tab="${tab}"]`).classList.add('active');
+    document.getElementById('tab-summary').style.display = tab === 'summary' ? 'block' : 'none';
+    document.getElementById('tab-detail').style.display = tab === 'detail' ? 'block' : 'none';
+    document.getElementById('tab-content').style.display = tab === 'content' ? 'block' : 'none';
+}
+
+function e(s) { return s == null ? '' : String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+// 初始化
+loadDoc();
+loadKeyValues();
+loadContent();
+</script>
+</body>
+</html>

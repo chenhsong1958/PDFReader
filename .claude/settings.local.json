@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "Bash(export PATH=\"/c/Users/G1313959/AppData/Local/Programs/Python/Python311:/c/Users/G1313959/AppData/Local/Programs/Python/Python311/Scripts:$PATH\")",
+      "Bash(pip install *)",
+      "Bash(curl *)",
+      "Bash(python -c ' *)",
+      "Bash(python main.py)",
+      "Bash(mysql *)",
+      "Bash(python -m json.tool)",
+      "Bash(taskkill /F /IM python.exe)",
+      "Bash(C:/Users/G1313959/AppData/Local/Programs/Python/Python311/python.exe main.py)",
+      "Bash(netstat -ano)"
+    ]
+  }
+}

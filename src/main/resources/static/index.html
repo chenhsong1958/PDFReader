@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PDF解析服务</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: -apple-system, "Microsoft YaHei", sans-serif; background: #f0f2f5; color: #333; padding: 20px; }
+        .container { max-width: 1000px; margin: 0 auto; }
+        h1 { text-align: center; margin-bottom: 24px; font-size: 24px; color: #1a1a1a; }
+        .card { background: #fff; border-radius: 8px; padding: 20px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,.1); }
+        .card h2 { font-size: 16px; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid #eee; color: #444; }
+
+        .status-row { display: flex; gap: 12px; margin-bottom: 8px; }
+        .status-item { flex: 1; text-align: center; padding: 10px; border-radius: 6px; }
+        .status-item.ok { background: #e6fffb; color: #13c2c2; }
+        .status-item.fail { background: #fff1f0; color: #f5222d; }
+        .status-item .label { font-size: 12px; margin-bottom: 4px; }
+        .status-item .value { font-size: 14px; font-weight: 600; }
+
+        .upload-area { border: 2px dashed #d9d9d9; border-radius: 8px; padding: 30px; text-align: center; cursor: pointer; transition: border-color .2s; }
+        .upload-area:hover { border-color: #1890ff; }
+        .upload-area p { color: #888; margin-top: 8px; }
+        .upload-area .icon { font-size: 36px; color: #1890ff; }
+        input[type="file"] { display: none; }
+        .btn { display: inline-block; padding: 8px 20px; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; transition: opacity .2s; }
+        .btn:hover { opacity: .85; }
+        .btn-primary { background: #1890ff; color: #fff; }
+        .btn-success { background: #52c41a; color: #fff; }
+        .btn-danger { background: #ff4d4f; color: #fff; }
+        .btn-sm { padding: 4px 12px; font-size: 12px; }
+        .btn:disabled { opacity: .5; cursor: not-allowed; }
+        .upload-result { margin-top: 12px; padding: 12px; border-radius: 4px; display: none; }
+        .upload-result.ok { background: #f6ffed; border: 1px solid #b7eb8f; }
+        .upload-result.err { background: #fff2f0; border-color: #ffccc7; }
+
+        /* 文档列表 */
+        table.doc-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        table.doc-table th, table.doc-table td { padding: 10px 8px; text-align: left; border-bottom: 1px solid #f0f0f0; }
+        table.doc-table th { background: #fafafa; font-weight: 600; color: #555; }
+        .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; color: #fff; }
+        .badge-pending { background: #faad14; }
+        .badge-processing { background: #1890ff; }
+        .badge-completed { background: #52c41a; }
+        .badge-failed { background: #ff4d4f; }
+        .empty { text-align: center; padding: 30px; color: #bbb; }
+
+        /* 关键字配置 */
+        .key-list { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+        .key-tag { background: #e6f7ff; border: 1px solid #91d5ff; padding: 4px 10px; border-radius: 4px; font-size: 13px; display: flex; align-items: center; gap: 6px; }
+        .key-tag .name { color: #1890ff; font-weight: 500; }
+        .key-tag .aliases { color: #888; font-size: 11px; }
+        .key-tag .del { cursor: pointer; color: #ff4d4f; margin-left: 4px; }
+        .key-form { display: flex; gap: 8px; flex-wrap: wrap; align-items: flex-end; }
+        .key-form .field { display: flex; flex-direction: column; gap: 4px; }
+        .key-form label { font-size: 12px; color: #888; }
+        .key-form input { padding: 6px 10px; border: 1px solid #d9d9d9; border-radius: 4px; font-size: 13px; width: 150px; }
+        .key-form input.wide { width: 280px; }
+
+        .refresh-btn { float: right; }
+        .loading { text-align: center; padding: 20px; color: #1890ff; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .spinner { display: inline-block; width: 16px; height: 16px; border: 2px solid #eee; border-top-color: #1890ff; border-radius: 50%; animation: spin .6s linear infinite; vertical-align: middle; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1>PDF解析服务</h1>
+
+    <!-- 服务状态 -->
+    <div class="card">
+        <h2>服务状态</h2>
+        <div class="status-row">
+            <div class="status-item" id="status-java"><div class="label">Spring Boot</div><div class="value">检测中...</div></div>
+            <div class="status-item" id="status-python"><div class="label">Python服务</div><div class="value">检测中...</div></div>
+            <div class="status-item" id="status-mysql"><div class="label">MySQL</div><div class="value">检测中...</div></div>
+        </div>
+    </div>
+
+    <!-- 关键字配置 -->
+    <div class="card">
+        <h2>关键字配置 <button class="btn btn-sm btn-primary refresh-btn" onclick="loadKeys()">刷新</button></h2>
+        <div id="key-list" class="key-list"><span class="loading"><span class="spinner"></span></span></div>
+        <div class="key-form">
+            <div class="field"><label>关键字名称</label><input type="text" id="new-key-name" placeholder="如：物料编码"></div>
+            <div class="field"><label>别名（逗号分隔）</label><input type="text" id="new-key-aliases" class="wide" placeholder="如：物料号,零件编号"></div>
+            <button class="btn btn-success btn-sm" onclick="addKey()">添加</button>
+        </div>
+    </div>
+
+    <!-- 上传 -->
+    <div class="card">
+        <h2>上传PDF</h2>
+        <div class="upload-area" id="upload-area">
+            <div class="icon">+</div>
+            <p>点击或拖拽PDF文件</p>
+            <input type="file" id="file-input" accept=".pdf">
+        </div>
+        <div style="margin-top:12px;text-align:center;">
+            <button class="btn btn-primary" id="upload-btn" disabled>上传并解析</button>
+        </div>
+        <div class="upload-result" id="upload-result"></div>
+    </div>
+
+    <!-- 文档列表 -->
+    <div class="card">
+        <h2>文档列表 <button class="btn btn-sm btn-primary refresh-btn" onclick="loadDocuments()">刷新</button></h2>
+        <div id="doc-list"><div class="loading"><span class="spinner"></span></div></div>
+    </div>
+</div>
+
+<script>
+const BASE = '';
+let selectedFile = null;
+
+// 状态检查
+async function checkStatus() {
+    const items = [
+        { id: 'status-java', url: BASE + '/api/v1/documents' },
+        { id: 'status-python', url: 'http://localhost:5000/health' },
+    ];
+    for (const item of items) {
+        const el = document.getElementById(item.id);
+        try {
+            await fetch(item.url, { signal: AbortSignal.timeout(3000) });
+            el.className = 'status-item ok';
+            el.querySelector('.value').textContent = '正常';
+        } catch {
+            el.className = 'status-item fail';
+            el.querySelector('.value').textContent = '异常';
+        }
+    }
+    const ok = document.getElementById('status-java').classList.contains('ok');
+    const mysqlEl = document.getElementById('status-mysql');
+    mysqlEl.className = ok ? 'status-item ok' : 'status-item fail';
+    mysqlEl.querySelector('.value').textContent = ok ? '正常' : '异常';
+}
+
+// 关键字
+async function loadKeys() {
+    const container = document.getElementById('key-list');
+    try {
+        const res = await fetch(BASE + '/api/v1/keys');
+        const data = await res.json();
+        if (!data.length) { container.innerHTML = '<span style="color:#bbb">暂无关键字</span>'; return; }
+        container.innerHTML = data.map(k => {
+            const aliases = (k.aliases || []).join(', ');
+            return `<div class="key-tag">
+                <span class="name">${e(k.key_name)}</span>
+                ${aliases ? `<span class="aliases">(${e(aliases)})</span>` : ''}
+                <span class="del" onclick="delKey(${k.id},'${e(k.key_name)}')">×</span>
+            </div>`;
+        }).join('');
+    } catch { container.innerHTML = '<span style="color:#f5222d">加载失败</span>'; }
+}
+
+async function addKey() {
+    const name = document.getElementById('new-key-name').value.trim();
+    const aliases = document.getElementById('new-key-aliases').value.split(/[,，]/).map(s=>s.trim()).filter(s=>s);
+    if (!name) { alert('请输入关键字名称'); return; }
+    try {
+        const res = await fetch(BASE + '/api/v1/keys', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ key_name: name, aliases })
+        });
+        if (!res.ok) throw new Error((await res.json()).detail || '失败');
+        document.getElementById('new-key-name').value = '';
+        document.getElementById('new-key-aliases').value = '';
+        loadKeys();
+    } catch (e) { alert('添加失败: ' + e.message); }
+}
+
+async function delKey(id, name) {
+    if (!confirm(`删除 "${name}"?`)) return;
+    await fetch(BASE + '/api/v1/keys/' + id, { method: 'DELETE' });
+    loadKeys();
+}
+
+// 上传
+const uploadArea = document.getElementById('upload-area');
+const fileInput = document.getElementById('file-input');
+const uploadBtn = document.getElementById('upload-btn');
+const uploadResult = document.getElementById('upload-result');
+
+uploadArea.onclick = () => fileInput.click();
+uploadArea.ondragover = e => { e.preventDefault(); uploadArea.classList.add('dragover'); };
+uploadArea.ondragleave = () => uploadArea.classList.remove('dragover');
+uploadArea.ondrop = e => { e.preventDefault(); uploadArea.classList.remove('dragover'); if (e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]); };
+fileInput.onchange = () => { if (fileInput.files.length) handleFile(fileInput.files[0]); };
+
+function handleFile(file) {
+    if (!file.name.toLowerCase().endsWith('.pdf')) { showResult('请选择PDF文件', true); return; }
+    selectedFile = file;
+    const sz = file.size > 1048576 ? (file.size/1048576).toFixed(1)+'MB' : (file.size/1024).toFixed(1)+'KB';
+    uploadArea.innerHTML = `<div class="icon">PDF</div><p>${e(file.name)} (${sz})</p><input type="file" id="file-input" accept=".pdf">`;
+    document.getElementById('file-input').onchange = function() { if (this.files.length) handleFile(this.files[0]); };
+    uploadBtn.disabled = false;
+}
+
+uploadBtn.onclick = async () => {
+    if (!selectedFile) return;
+    uploadBtn.disabled = true;
+    uploadBtn.textContent = '上传中...';
+    const fd = new FormData();
+    fd.append('file', selectedFile);
+    try {
+        const res = await fetch(BASE + '/api/v1/upload', { method: 'POST', body: fd });
+        const data = await res.json();
+        if (data.doc_id) {
+            showResult(`上传成功，正在解析...`, false);
+            pollStatus(data.doc_id);
+        } else {
+            showResult(data.message || '上传失败', true);
+        }
+    } catch (e) { showResult('请求失败: ' + e.message, true); }
+    uploadBtn.disabled = false;
+    uploadBtn.textContent = '上传并解析';
+};
+
+function showResult(msg, isErr) {
+    uploadResult.style.display = 'block';
+    uploadResult.className = 'upload-result ' + (isErr ? 'err' : 'ok');
+    uploadResult.textContent = msg;
+}
+
+function pollStatus(docId) {
+    let c = 0;
+    const t = setInterval(async () => {
+        c++;
+        if (c > 90) { clearInterval(t); return; }
+        try {
+            const res = await fetch(BASE + '/api/v1/status/' + docId);
+            const d = await res.json();
+            loadDocuments();
+            if (d.status === 'completed') {
+                clearInterval(t);
+                showResult('解析完成！', false);
+                // 跳转到详情页
+                window.location.href = 'detail.html?id=' + docId;
+            } else if (d.status === 'failed') {
+                clearInterval(t);
+                showResult('解析失败: ' + (d.message || '未知错误'), true);
+            }
+        } catch { clearInterval(t); }
+    }, 3000);
+}
+
+// 文档列表
+async function loadDocuments() {
+    const container = document.getElementById('doc-list');
+    container.innerHTML = '<div class="loading"><span class="spinner"></span></div>';
+    try {
+        const res = await fetch(BASE + '/api/v1/documents');
+        const docs = await res.json();
+        if (!docs.length) { container.innerHTML = '<div class="empty">暂无文档</div>'; return; }
+        container.innerHTML = '<table class="doc-table"><thead><tr><th>文件名</th><th>大小</th><th>状态</th><th>上传时间</th><th>操作</th></tr></thead><tbody>' +
+            docs.map(d => {
+                const sz = d.fileSize > 1048576 ? (d.fileSize/1048576).toFixed(1)+'MB' : (d.fileSize/1024).toFixed(1)+'KB';
+                const badge = 'badge badge-' + (d.status || 'pending');
+                return `<tr>
+                    <td>${e(d.fileName)}</td>
+                    <td>${sz}</td>
+                    <td><span class="${badge}">${d.status||'-'}</span></td>
+                    <td>${d.uploadTime||'-'}</td>
+                    <td>
+                        ${d.status==='completed' ? `<a href="detail.html?id=${d.id}" class="btn btn-sm btn-primary">查看详情</a> ` : ''}
+                        <button class="btn btn-sm btn-danger" onclick="delDoc(${d.id})">删除</button>
+                    </td>
+                </tr>`;
+            }).join('') + '</tbody></table>';
+    } catch { container.innerHTML = '<div class="empty">加载失败</div>'; }
+}
+
+async function delDoc(id) {
+    if (!confirm('确定删除?')) return;
+    await fetch(BASE + '/api/v1/document/' + id, { method: 'DELETE' });
+    loadDocuments();
+}
+
+function e(s) { return s == null ? '' : String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+// 初始化
+checkStatus();
+loadKeys();
+loadDocuments();
+</script>
+</body>
+</html>
