@@ -71,3 +71,56 @@ class KeyDataResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+# ---- 关联关系 ----
+
+class RelationCreate(BaseModel):
+    source_doc_id: int
+    target_doc_id: int
+    relation_type: str  # 'main'/'sub'/'related'
+    match_key: Optional[str] = None
+    match_value: Optional[str] = None
+
+
+class RelationResponse(BaseModel):
+    id: int
+    source_doc_id: int
+    target_doc_id: int
+    relation_type: str
+    match_key: Optional[str] = None
+    match_value: Optional[str] = None
+    created_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class RelatedDocumentResponse(BaseModel):
+    """关联文档响应，包含文档详情和关系信息"""
+    relation_id: int
+    relation_type: str
+    match_key: Optional[str] = None
+    match_value: Optional[str] = None
+    doc_id: int
+    file_name: str
+    status: Optional[str] = None
+    page_count: Optional[int] = None
+
+    class Config:
+        from_attributes = True
+
+
+class BatchUploadResponse(BaseModel):
+    """批量上传响应"""
+    doc_ids: List[int]
+    status: str
+    message: Optional[str] = None
+
+
+class MainSubRelationConfig(BaseModel):
+    """主/子图纸关系配置（基于关键字）"""
+    main_key: str  # 关键字名称
+    main_value: str  # 主图纸的关键字值
+    sub_key: Optional[str] = None  # 子图纸的关键字名称（默认同main_key）
+    sub_value_pattern: Optional[str] = None  # 子图纸值的匹配模式（如 "A-*"）

@@ -1,7 +1,7 @@
 import os
 import shutil
 from typing import List
-from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, BackgroundTasks
+from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, BackgroundTasks, Form
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -9,9 +9,12 @@ from app.models import PdfDocument, PdfContent, KeyConfig, KeyData
 from app.models.schemas import (
     ParseResponse, ContentResponse,
     KeyConfigCreate, KeyConfigUpdate, KeyConfigResponse,
-    KeyDataResponse
+    KeyDataResponse,
+    RelationCreate, RelationResponse, RelatedDocumentResponse, BatchUploadResponse,
+    MainSubRelationConfig
 )
 from app.services.pdf_parser import parser_service
+from app.services.relation_service import relation_service
 
 router = APIRouter(prefix="/api/v1", tags=["pdf"])
 
@@ -88,6 +91,20 @@ def process_pdf_task(file_path: str, doc_id: int, db_url: str):
         doc.page_count = result["page_count"]
         doc.parse_time = __import__('datetime').datetime.now()
         db.commit()
+
+        # 解析完成后，与现有文档进行关联检测
+        try:
+            all_completed_docs = db.query(PdfDocument).filter(
+                PdfDocument.status == "completed",
+                PdfDocument.id != doc_id
+            ).all()
+
+            if all_completed_docs:
+                existing_ids = [d.id for d in all_completed_docs]
+                relation_service.detect_relations(db, [doc_id] + existing_ids)
+        except Exception as rel_e:
+            # 关联检测失败不影响主流程
+            print(f"关联检测失败: {str(rel_e)}")
 
     except Exception as e:
         doc = db.query(PdfDocument).filter(PdfDocument.id == doc_id).first()
@@ -314,3 +331,209 @@ async def delete_key(key_id: int, db: Session = Depends(get_db)):
     db.delete(key_config)
     db.commit()
     return {"message": "删除成功"}
+
+
+# ==================== 批量上传 ====================
+
+@router.post("/upload/batch", response_model=BatchUploadResponse)
+async def upload_batch(
+    background_tasks: BackgroundTasks,
+    files: List[UploadFile] = File(...),
+    relations: str = Form(default=None),
+    db: Session = Depends(get_db)
+):
+    """
+    批量上传PDF文件，支持指定基于关键字的主/子图纸关系
+
+    relations: JSON字符串，格式:
+    {
+        "main_key": "图号",
+        "main_value": "A-100",
+        "sub_key": "图号",
+        "sub_value_pattern": "A-100-*"
+    }
+    """
+    import json
+
+    upload_dir = "./uploads"
+    os.makedirs(upload_dir, exist_ok=True)
+
+    doc_ids = []
+    relation_info = None
+
+    if relations:
+        try:
+            relation_info = MainSubRelationConfig.model_validate(json.loads(relations))
+        except (json.JSONDecodeError, ValueError):
+            relation_info = None
+
+    # 逐个处理文件
+    for file in files:
+        if not file.filename.lower().endswith('.pdf'):
+            continue
+
+        file_path = os.path.join(upload_dir, file.filename)
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+
+        file_size = os.path.getsize(file_path)
+
+        doc = PdfDocument(
+            file_name=file.filename,
+            file_path=file_path,
+            file_size=file_size,
+            status="pending"
+        )
+        db.add(doc)
+        db.commit()
+        db.refresh(doc)
+        doc_ids.append(doc.id)
+
+        from app.config import settings
+        background_tasks.add_task(
+            process_pdf_task,
+            file_path,
+            doc.id,
+            settings.DATABASE_URL
+        )
+
+    # 解析完成后自动按关键字设置主/子关系并检测其他关联
+    if relation_info and doc_ids:
+        background_tasks.add_task(
+            _set_relations_after_parse,
+            relation_info.model_dump(),
+            doc_ids
+        )
+
+    return BatchUploadResponse(
+        doc_ids=doc_ids,
+        status="pending",
+        message=f"已上传 {len(doc_ids)} 个文件，正在后台解析"
+    )
+
+
+def _set_relations_after_parse(relation_info: dict, all_doc_ids: List[int]):
+    """解析完成后按关键字设置主/子关系并执行自动关联检测"""
+    import time
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from app.config import settings
+
+    engine = create_engine(settings.DATABASE_URL)
+    SessionLocal = sessionmaker(bind=engine)
+
+    max_wait = 300  # 5分钟
+    check_interval = 5
+    waited = 0
+
+    while waited < max_wait:
+        db = SessionLocal()
+        try:
+            docs = db.query(PdfDocument).filter(PdfDocument.id.in_(all_doc_ids)).all()
+            all_completed = all(d.status in ["completed", "failed"] for d in docs)
+
+            if all_completed:
+                # 按关键字检测主/子关系
+                if relation_info:
+                    completed_ids = [d.id for d in docs if d.status == "completed"]
+                    if len(completed_ids) >= 2:
+                        relation_service.detect_main_sub_by_keywords(
+                            db,
+                            completed_ids,
+                            main_key=relation_info.get("main_key"),
+                            main_value=relation_info.get("main_value"),
+                            sub_key=relation_info.get("sub_key"),
+                            sub_value_pattern=relation_info.get("sub_value_pattern")
+                        )
+
+                # 自动检测其他关联（基于相同关键字值）
+                completed_ids = [d.id for d in docs if d.status == "completed"]
+                if len(completed_ids) >= 2:
+                    relation_service.detect_relations(db, completed_ids)
+                break
+        finally:
+            db.close()
+
+        time.sleep(check_interval)
+        waited += check_interval
+
+
+# ==================== 关联关系管理 ====================
+
+@router.get("/documents/{doc_id}/relations", response_model=List[RelationResponse])
+async def get_document_relations(doc_id: int, db: Session = Depends(get_db)):
+    """获取文档的所有关联关系"""
+    doc = db.query(PdfDocument).filter(PdfDocument.id == doc_id).first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="文档不存在")
+
+    relations = relation_service.get_document_relations(db, doc_id)
+    return [RelationResponse(
+        id=r.id,
+        source_doc_id=r.source_doc_id,
+        target_doc_id=r.target_doc_id,
+        relation_type=r.relation_type,
+        match_key=r.match_key,
+        match_value=r.match_value,
+        created_at=r.created_at
+    ) for r in relations]
+
+
+@router.get("/documents/{doc_id}/related", response_model=List[RelatedDocumentResponse])
+async def get_related_documents(doc_id: int, db: Session = Depends(get_db)):
+    """获取关联文档列表（含文档详情）"""
+    doc = db.query(PdfDocument).filter(PdfDocument.id == doc_id).first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="文档不存在")
+
+    return relation_service.get_related_documents(db, doc_id)
+
+
+@router.post("/relations", response_model=RelationResponse)
+async def create_relation(relation: RelationCreate, db: Session = Depends(get_db)):
+    """手动创建关联关系"""
+    # 验证文档存在
+    source = db.query(PdfDocument).filter(PdfDocument.id == relation.source_doc_id).first()
+    target = db.query(PdfDocument).filter(PdfDocument.id == relation.target_doc_id).first()
+
+    if not source or not target:
+        raise HTTPException(status_code=404, detail="文档不存在")
+
+    new_relation = relation_service.create_relation(
+        db,
+        relation.source_doc_id,
+        relation.target_doc_id,
+        relation.relation_type,
+        relation.match_key,
+        relation.match_value
+    )
+
+    return RelationResponse(
+        id=new_relation.id,
+        source_doc_id=new_relation.source_doc_id,
+        target_doc_id=new_relation.target_doc_id,
+        relation_type=new_relation.relation_type,
+        match_key=new_relation.match_key,
+        match_value=new_relation.match_value,
+        created_at=new_relation.created_at
+    )
+
+
+@router.delete("/relations/{relation_id}")
+async def delete_relation(relation_id: int, db: Session = Depends(get_db)):
+    """删除关联关系"""
+    success = relation_service.delete_relation(db, relation_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="关联关系不存在")
+    return {"message": "删除成功"}
+
+
+@router.post("/relations/auto-detect")
+async def auto_detect_relations(db: Session = Depends(get_db)):
+    """对所有文档执行自动关联检测"""
+    new_relations = relation_service.auto_detect_all(db)
+    return {
+        "message": "自动检测完成",
+        "new_relations_count": len(new_relations),
+        "new_relations": new_relations
+    }

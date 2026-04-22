@@ -55,3 +55,16 @@ class KeyData(Base):
     page_num = Column(Integer, comment="所在页码")
     confidence = Column(Integer, comment="置信度")
     created_at = Column(DateTime, default=datetime.now)
+
+
+class PdfDocumentRelation(Base):
+    """图纸关联关系表"""
+    __tablename__ = "pdf_document_relation"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    source_doc_id = Column(BigInteger, nullable=False, index=True, comment="源图纸ID")
+    target_doc_id = Column(BigInteger, nullable=False, index=True, comment="目标图纸ID")
+    relation_type = Column(String(20), nullable=False, comment="关联类型: main/sub/related")
+    match_key = Column(String(100), comment="匹配的关键字")
+    match_value = Column(String(500), comment="匹配的关键字值")
+    created_at = Column(DateTime, default=datetime.now)

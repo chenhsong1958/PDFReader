@@ -54,6 +54,24 @@
         table.data-table th { background: #e6f7ff; padding: 8px 10px; border: 1px solid #d9d9d9; font-weight: 600; color: #1890ff; }
         table.data-table td { padding: 8px 10px; border: 1px solid #d9d9d9; }
 
+        /* 关联图纸 */
+        .relation-card { display: flex; align-items: center; gap: 16px; padding: 14px 20px; border-bottom: 1px solid #f0f0f0; transition: background .2s; }
+        .relation-card:hover { background: #f5f9ff; }
+        .relation-card .rel-info { flex: 1; }
+        .relation-card .rel-type { display: inline-block; padding: 2px 8px; border-radius: 3px; font-size: 12px; margin-bottom: 4px; }
+        .rel-type-main { background: #e6f7ff; color: #1890ff; }
+        .rel-type-sub { background: #fffbe6; color: #faad14; }
+        .rel-type-related { background: #f6ffed; color: #52c41a; }
+        .relation-card .rel-match { font-size: 12px; color: #888; }
+        .relation-card .doc-name { font-weight: 500; color: #1a1a1a; font-size: 14px; }
+        .relation-card .doc-status { font-size: 12px; color: #888; margin-top: 2px; }
+
+        .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; color: #fff; }
+        .badge-completed { background: #52c41a; }
+        .badge-pending { background: #faad14; }
+        .badge-processing { background: #1890ff; }
+        .badge-failed { background: #ff4d4f; }
+
         /* 通用 */
         .empty { text-align: center; padding: 40px; color: #bbb; font-size: 14px; }
         .loading { text-align: center; padding: 40px; color: #1890ff; }
@@ -73,11 +91,13 @@
         <div class="tab active" data-tab="summary" onclick="switchTab('summary')">关键信息汇总</div>
         <div class="tab" data-tab="detail" onclick="switchTab('detail')">关键信息明细</div>
         <div class="tab" data-tab="content" onclick="switchTab('content')">原始内容</div>
+        <div class="tab" data-tab="relations" onclick="switchTab('relations')">关联图纸</div>
     </div>
     <div class="tab-content">
         <div id="tab-summary"><div class="loading"><span class="spinner"></span> 加载中...</div></div>
         <div id="tab-detail" style="display:none;"><div class="loading"><span class="spinner"></span></div></div>
         <div id="tab-content" style="display:none;"><div class="loading"><span class="spinner"></span></div></div>
+        <div id="tab-relations" style="display:none;"><div class="loading"><span class="spinner"></span></div></div>
     </div>
 </div>
 
@@ -235,6 +255,7 @@ function switchTab(tab) {
     document.getElementById('tab-summary').style.display = tab === 'summary' ? 'block' : 'none';
     document.getElementById('tab-detail').style.display = tab === 'detail' ? 'block' : 'none';
     document.getElementById('tab-content').style.display = tab === 'content' ? 'block' : 'none';
+    document.getElementById('tab-relations').style.display = tab === 'relations' ? 'block' : 'none';
 }
 
 function e(s) { return s == null ? '' : String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
@@ -243,6 +264,64 @@ function e(s) { return s == null ? '' : String(s).replace(/&/g,'&amp;').replace(
 loadDoc();
 loadKeyValues();
 loadContent();
+loadRelations();
+
+// 加载关联图纸
+async function loadRelations() {
+    const container = document.getElementById('tab-relations');
+    try {
+        const res = await fetch(BASE + '/api/v1/documents/' + docId + '/related');
+        const data = await res.json();
+
+        if (!data.length) {
+            container.innerHTML = '<div class="empty">暂无关联图纸</div>' +
+                '<div style="text-align:center;padding:10px;">' +
+                '<button class="btn btn-primary" style="padding:8px 20px;border:none;border-radius:4px;cursor:pointer;font-size:13px;background:#1890ff;color:#fff;" onclick="triggerAutoDetect()">自动检测关联</button>' +
+                '</div>';
+            return;
+        }
+
+        const typeMap = { 'main': '主图纸', 'sub': '子图纸', 'related': '关联' };
+        let html = '';
+        data.forEach(item => {
+            const typeLabel = typeMap[item.relation_type] || item.relation_type;
+            const typeCls = item.relation_type === 'main' ? 'main' : (item.relation_type === 'sub' ? 'sub' : 'related');
+            const badgeCls = 'badge badge-' + (item.status || 'pending');
+            html += `<div class="relation-card">
+                <div class="rel-info">
+                    <div><span class="rel-type rel-type-${typeCls}">${typeLabel}</span></div>
+                    <div class="doc-name">${e(item.file_name)}</div>
+                    <div class="doc-status">
+                        状态: <span class="${badgeCls}">${item.status || '-'}</span>
+                        ${item.page_count ? ' | ' + item.page_count + '页' : ''}
+                    </div>
+                    ${item.match_key ? `<div class="rel-match">匹配: ${e(item.match_key)} = ${e(item.match_value)}</div>` : ''}
+                </div>
+                <div>
+                    <a href="detail.html?id=${item.doc_id}" class="btn btn-sm btn-primary" style="display:inline-block;padding:4px 12px;border-radius:4px;font-size:12px;background:#1890ff;color:#fff;text-decoration:none;">查看详情</a>
+                </div>
+            </div>`;
+        });
+
+        html += '<div style="text-align:center;padding:12px;">' +
+            '<button class="btn btn-primary" style="padding:6px 16px;border:none;border-radius:4px;cursor:pointer;font-size:13px;background:#1890ff;color:#fff;" onclick="triggerAutoDetect()">重新检测关联</button>' +
+            '</div>';
+        container.innerHTML = html;
+    } catch {
+        container.innerHTML = '<div class="empty">加载失败</div>';
+    }
+}
+
+async function triggerAutoDetect() {
+    try {
+        const res = await fetch(BASE + '/api/v1/relations/auto-detect', { method: 'POST' });
+        const data = await res.json();
+        alert('检测完成，新增 ' + (data.new_relations_count || 0) + ' 条关联关系');
+        loadRelations();
+    } catch (err) {
+        alert('检测失败: ' + err.message);
+    }
+}
 </script>
 </body>
 </html>

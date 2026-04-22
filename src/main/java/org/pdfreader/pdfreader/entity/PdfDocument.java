@@ -28,6 +28,10 @@ public class PdfDocument {
 
     private String errorMessage;
 
+    private Integer isMain = 0;
+
+    private Long parentDocId;
+
     @PrePersist
     protected void onCreate() {
         uploadTime = LocalDateTime.now();
@@ -52,4 +56,8 @@ public class PdfDocument {
     public void setStatus(String status) { this.status = status; }
     public String getErrorMessage() { return errorMessage; }
     public void setErrorMessage(String errorMessage) { this.errorMessage = errorMessage; }
+    public Integer getIsMain() { return isMain; }
+    public void setIsMain(Integer isMain) { this.isMain = isMain; }
+    public Long getParentDocId() { return parentDocId; }
+    public void setParentDocId(Long parentDocId) { this.parentDocId = parentDocId; }
 }

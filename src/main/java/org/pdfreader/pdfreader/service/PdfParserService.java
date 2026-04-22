@@ -72,6 +72,43 @@ public class PdfParserService {
     }
 
     /**
+     * 批量上传PDF到Python解析服务
+     */
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> uploadBatch(List<MultipartFile> files, String relations) throws IOException {
+        String url = parserServiceUrl + "/api/v1/upload/batch";
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.MULTIPART_FORM_DATA);
+
+        MultiValueMap<String, Object> body = new LinkedMultiValueMap<>();
+        for (MultipartFile file : files) {
+            ByteArrayResource fileResource = new ByteArrayResource(file.getBytes()) {
+                @Override
+                public String getFilename() {
+                    return file.getOriginalFilename();
+                }
+            };
+            body.add("files", fileResource);
+        }
+
+        if (relations != null && !relations.isEmpty()) {
+            body.add("relations", relations);
+        }
+
+        HttpEntity<MultiValueMap<String, Object>> requestEntity = new HttpEntity<>(body, headers);
+
+        ResponseEntity<Map> response = restTemplate.exchange(
+            url,
+            HttpMethod.POST,
+            requestEntity,
+            Map.class
+        );
+
+        return response.getBody();
+    }
+
+    /**
      * 查询解析状态
      */
     public ParseResponse getStatus(Long docId) {
@@ -189,5 +226,78 @@ public class PdfParserService {
     public void deleteKey(Long keyId) {
         String url = parserServiceUrl + "/api/v1/keys/" + keyId;
         restTemplate.delete(url);
+    }
+
+    // ==================== 关联关系管理 ====================
+
+    /**
+     * 获取文档的所有关联关系
+     */
+    @SuppressWarnings("unchecked")
+    public List<Map<String, Object>> getDocumentRelations(Long docId) {
+        String url = parserServiceUrl + "/api/v1/documents/" + docId + "/relations";
+        ResponseEntity<List> response = restTemplate.exchange(
+            url,
+            HttpMethod.GET,
+            null,
+            List.class
+        );
+        return response.getBody();
+    }
+
+    /**
+     * 获取关联文档列表
+     */
+    @SuppressWarnings("unchecked")
+    public List<Map<String, Object>> getRelatedDocuments(Long docId) {
+        String url = parserServiceUrl + "/api/v1/documents/" + docId + "/related";
+        ResponseEntity<List> response = restTemplate.exchange(
+            url,
+            HttpMethod.GET,
+            null,
+            List.class
+        );
+        return response.getBody();
+    }
+
+    /**
+     * 手动创建关联关系
+     */
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> createRelation(Map<String, Object> relation) {
+        String url = parserServiceUrl + "/api/v1/relations";
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        HttpEntity<Map<String, Object>> entity = new HttpEntity<>(relation, headers);
+        ResponseEntity<Map> response = restTemplate.exchange(
+            url,
+            HttpMethod.POST,
+            entity,
+            Map.class
+        );
+        return response.getBody();
+    }
+
+    /**
+     * 删除关联关系
+     */
+    public void deleteRelation(Long relationId) {
+        String url = parserServiceUrl + "/api/v1/relations/" + relationId;
+        restTemplate.delete(url);
+    }
+
+    /**
+     * 自动检测所有文档的关联关系
+     */
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> autoDetectRelations() {
+        String url = parserServiceUrl + "/api/v1/relations/auto-detect";
+        ResponseEntity<Map> response = restTemplate.exchange(
+            url,
+            HttpMethod.POST,
+            null,
+            Map.class
+        );
+        return response.getBody();
     }
 }

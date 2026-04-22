@@ -11,7 +11,12 @@
       "Bash(python -m json.tool)",
       "Bash(taskkill /F /IM python.exe)",
       "Bash(C:/Users/G1313959/AppData/Local/Programs/Python/Python311/python.exe main.py)",
-      "Bash(netstat -ano)"
+      "Bash(netstat -ano)",
+      "Bash(./gradlew build *)",
+      "Bash(./gradlew bootRun)",
+      "Bash(python -m py_compile app/api/routes.py app/services/relation_service.py app/models/schemas.py)",
+      "Bash(python test_keyword_relations.py)",
+      "Bash(netstat -tuln)"
     ]
   }
 }

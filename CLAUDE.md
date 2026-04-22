@@ -4,65 +4,94 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-PDFReader is a Spring Boot application that acts as a **Java backend proxy** to a separate Python-based PDF parsing service. It exposes a REST API for uploading, querying, and managing PDF documents, forwarding parse requests to the Python service and storing document metadata in MySQL.
+PDFReader is a two-service PDF document parsing system:
 
-## Architecture
+1. **Java Spring Boot** (port 9090) — REST API gateway, proxies requests to Python service
+2. **Python FastAPI** (port 5000) — PDF parsing engine with OCR support, located in `pdf-parser-service/`
 
-Two-service architecture — this repo is the **Java gateway** only:
+Both services share the same MySQL database. The Java service does not parse PDFs — it forwards uploads to the Python service via `RestTemplate`.
 
-1. **This Spring Boot app** (port 8080) — REST API, file upload proxy, document metadata storage via JPA/MySQL
-2. **External Python parser service** (configured via `parser.service.url`, default `http://localhost:5000`) — performs actual PDF parsing. Must be running independently.
+## Build & Run Commands
 
-Request flow: `Client → PdfController → PdfParserService → (RestTemplate) → Python service → response`
-
-The Java service does **not** parse PDFs itself. It proxies file uploads to the Python service and relays responses.
-
-## Build Commands
-
+**Java Service:**
 ```bash
 ./gradlew build
 ./gradlew test
-./gradlew test --tests "org.pdfreader.pdfreader.PdfReaderApplicationTests"
 ./gradlew bootRun
-./gradlew clean
 ```
 
-## Tech Stack
+**Python Service:**
+```bash
+cd pdf-parser-service
+pip install -r requirements.txt
+python main.py
+# or: uvicorn main:app --host 0.0.0.0 --port 5000
+```
 
-- Spring Boot 2.6.13, Java 8, Gradle
-- Spring Data JPA + MySQL 8 (Hibernate dialect: `MySQL8Dialect`)
-- Lombok (annotation processor)
-- `RestTemplate` for HTTP calls to Python service
-- JUnit 5 via spring-boot-starter-test
+**Database:**
+```bash
+mysql -u root -p < sql/init.sql
+```
+
+## Architecture
+
+```
+Client → Java (9090) → Python (5000) → MySQL
+                ↓
+         RestTemplate proxy
+```
+
+**Java** (`org.pdfreader.pdfreader`):
+- `controller/PdfController` — REST endpoints, proxies to Python
+- `service/PdfParserService` — HTTP client to Python service
+- `entity/` — JPA entities (PdfDocument, PdfContent)
+- `config/ParserConfig` — RestTemplate bean + parser URL config
+
+**Python** (`pdf-parser-service/app/`):
+- `api/routes.py` — FastAPI endpoints, background task processing
+- `services/pdf_parser.py` — Core parsing: PyMuPDF + pdfplumber for text, PaddleOCR for images
+- `models/` — SQLAlchemy models (PdfDocument, PdfContent, KeyConfig, KeyData)
 
 ## Key Configuration
 
-All in `application.yml`, overridable via env vars:
+**Java** (`application.yml`):
+- `MYSQL_HOST/PORT/DATABASE/USER/PASSWORD` — database
+- `PARSER_SERVICE_URL` — Python service URL (default `http://localhost:5000`)
+- Server port: 9090
 
-- `MYSQL_HOST`, `MYSQL_PORT`, `MYSQL_DATABASE`, `MYSQL_USER`, `MYSQL_PASSWORD` — database connection
-- `PARSER_SERVICE_URL` — base URL of the Python parser service
-- Max file upload: 100MB (`spring.servlet.multipart`)
-- JPA `ddl-auto: update` (schema auto-updates on startup)
+**Python** (`.env` or env vars):
+- `MYSQL_HOST/PORT/DATABASE/USER/PASSWORD` — database
+- `OCR_ENABLED`, `OCR_LANG` (default `ch`), `OCR_USE_GPU`
+- `UPLOAD_DIR` (default `./uploads`)
 
 ## API Endpoints
 
-All under `/api/v1`:
+All under `/api/v1` on both services:
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| POST | `/upload` | Upload PDF (proxied to Python service) |
+| POST | `/upload` | Upload PDF (async parsing in background) |
 | GET | `/status/{docId}` | Query parse status |
-| GET | `/content/{docId}` | Get parsed content (filter by `contentType`, `page`) |
+| GET | `/content/{docId}` | Get parsed content (filter: `contentType`, `page`) |
+| GET | `/key-values/{docId}` | Get extracted key-value pairs |
 | GET | `/documents` | List all documents |
 | DELETE | `/document/{docId}` | Delete document |
+| POST | `/reparse/{docId}` | Re-parse existing document |
+| GET/POST/PUT/DELETE | `/keys` | Keyword config CRUD |
 
-## Package Layout
+## Database Tables
 
-Base package: `org.pdfreader.pdfreader`
+- `pdf_document` — document metadata, status, page count
+- `pdf_content` — extracted text/tables per page
+- `key_config` — user-defined keywords for extraction (e.g., "物料编码" with aliases)
+- `key_data` — extracted key-value results
+- `pdf_document_relation` — document relationships (main/sub drawings)
 
-- `controller/PdfController` — REST endpoints
-- `service/PdfParserService` — proxies requests to Python service, uses `PdfDocumentRepository` for document listing
-- `entity/PdfDocument`, `entity/PdfContent` — JPA entities (`pdf_document`, `pdf_content` tables)
-- `repository/` — Spring Data JPA interfaces
-- `dto/ParseResponse`, `dto/ContentResponse` — response DTOs
-- `config/ParserConfig` — `RestTemplate` bean + parser URL config
+## PDF Parsing Flow
+
+1. Upload → Python saves file, creates `PdfDocument` (status: pending)
+2. Background task: classify pages (text vs image based on text threshold)
+3. Text pages: pdfplumber extracts text/tables
+4. Image pages: PaddleOCR extracts text, detects table structures
+5. Extract key-values from text, tables, and OCR spatial data
+6. Save to `pdf_content` and `key_data`, update status to completed/failed

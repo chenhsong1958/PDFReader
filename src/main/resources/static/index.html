@@ -91,14 +91,37 @@
 
     <!-- 上传 -->
     <div class="card">
-        <h2>上传PDF</h2>
+        <h2>批量上传PDF</h2>
+        <input type="file" id="file-input" accept=".pdf" multiple style="display:none;">
         <div class="upload-area" id="upload-area">
             <div class="icon">+</div>
-            <p>点击或拖拽PDF文件</p>
-            <input type="file" id="file-input" accept=".pdf">
+            <p>点击或拖拽PDF文件（支持多选）</p>
+        </div>
+        <div id="file-list" style="margin-top:8px;font-size:13px;color:#555;"></div>
+        <div style="margin-top:12px;display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;">
+            <div>
+                <label style="font-size:13px;color:#888;display:block;margin-bottom:4px;">主图关键字</label>
+                <select id="main-relation-key" style="width:160px;padding:4px 8px;border:1px solid #d9d9d9;border-radius:4px;">
+                    <option value="">请选择关键字</option>
+                </select>
+            </div>
+            <div>
+                <label style="font-size:13px;color:#888;display:block;margin-bottom:4px;">主图关键字值</label>
+                <input type="text" id="main-relation-value" style="width:160px;padding:4px 8px;border:1px solid #d9d9d9;border-radius:4px;" placeholder="如: A-100">
+            </div>
+            <div>
+                <label style="font-size:13px;color:#888;display:block;margin-bottom:4px;">子图关键字（可选）</label>
+                <select id="sub-relation-key" style="width:160px;padding:4px 8px;border:1px solid #d9d9d9;border-radius:4px;">
+                    <option value="">默认与主图相同</option>
+                </select>
+            </div>
+            <div>
+                <label style="font-size:13px;color:#888;display:block;margin-bottom:4px;">子图匹配模式（可选）</label>
+                <input type="text" id="sub-relation-pattern" style="width:180px;padding:4px 8px;border:1px solid #d9d9d9;border-radius:4px;" placeholder="如: A-100-*">
+            </div>
         </div>
         <div style="margin-top:12px;text-align:center;">
-            <button class="btn btn-primary" id="upload-btn" disabled>上传并解析</button>
+            <button class="btn btn-primary" id="upload-btn" disabled>批量上传并解析</button>
         </div>
         <div class="upload-result" id="upload-result"></div>
     </div>
@@ -112,7 +135,7 @@
 
 <script>
 const BASE = '';
-let selectedFile = null;
+let selectedFiles = [];
 
 // 状态检查
 async function checkStatus() {
@@ -140,10 +163,17 @@ async function checkStatus() {
 // 关键字
 async function loadKeys() {
     const container = document.getElementById('key-list');
+    const mainSelect = document.getElementById('main-relation-key');
+    const subSelect = document.getElementById('sub-relation-key');
     try {
         const res = await fetch(BASE + '/api/v1/keys');
         const data = await res.json();
-        if (!data.length) { container.innerHTML = '<span style="color:#bbb">暂无关键字</span>'; return; }
+        if (!data.length) {
+            container.innerHTML = '<span style="color:#bbb">暂无关键字</span>';
+            mainSelect.innerHTML = '<option value="">请选择关键字</option>';
+            subSelect.innerHTML = '<option value="">默认与主图相同</option>';
+            return;
+        }
         container.innerHTML = data.map(k => {
             const aliases = (k.aliases || []).join(', ');
             return `<div class="key-tag">
@@ -152,7 +182,15 @@ async function loadKeys() {
                 <span class="del" onclick="delKey(${k.id},'${e(k.key_name)}')">×</span>
             </div>`;
         }).join('');
-    } catch { container.innerHTML = '<span style="color:#f5222d">加载失败</span>'; }
+
+        const options = data.map(k => `<option value="${e(k.key_name)}">${e(k.key_name)}</option>`).join('');
+        mainSelect.innerHTML = '<option value="">请选择关键字</option>' + options;
+        subSelect.innerHTML = '<option value="">默认与主图相同</option>' + options;
+    } catch {
+        container.innerHTML = '<span style="color:#f5222d">加载失败</span>';
+        mainSelect.innerHTML = '<option value="">请选择关键字</option>';
+        subSelect.innerHTML = '<option value="">默认与主图相同</option>';
+    }
 }
 
 async function addKey() {
@@ -178,73 +216,120 @@ async function delKey(id, name) {
     loadKeys();
 }
 
-// 上传
+// 批量上传
 const uploadArea = document.getElementById('upload-area');
 const fileInput = document.getElementById('file-input');
 const uploadBtn = document.getElementById('upload-btn');
 const uploadResult = document.getElementById('upload-result');
+const fileListEl = document.getElementById('file-list');
 
 uploadArea.onclick = () => fileInput.click();
-uploadArea.ondragover = e => { e.preventDefault(); uploadArea.classList.add('dragover'); };
+uploadArea.ondragover = ev => { ev.preventDefault(); uploadArea.classList.add('dragover'); };
 uploadArea.ondragleave = () => uploadArea.classList.remove('dragover');
-uploadArea.ondrop = e => { e.preventDefault(); uploadArea.classList.remove('dragover'); if (e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]); };
-fileInput.onchange = () => { if (fileInput.files.length) handleFile(fileInput.files[0]); };
+uploadArea.ondrop = ev => {
+    ev.preventDefault();
+    uploadArea.classList.remove('dragover');
+    if (ev.dataTransfer.files.length) handleFiles(ev.dataTransfer.files);
+};
+fileInput.onchange = () => { if (fileInput.files.length) handleFiles(fileInput.files); };
 
-function handleFile(file) {
-    if (!file.name.toLowerCase().endsWith('.pdf')) { showResult('请选择PDF文件', true); return; }
-    selectedFile = file;
-    const sz = file.size > 1048576 ? (file.size/1048576).toFixed(1)+'MB' : (file.size/1024).toFixed(1)+'KB';
-    uploadArea.innerHTML = `<div class="icon">PDF</div><p>${e(file.name)} (${sz})</p><input type="file" id="file-input" accept=".pdf">`;
-    document.getElementById('file-input').onchange = function() { if (this.files.length) handleFile(this.files[0]); };
+function handleFiles(files) {
+    const pdfFiles = Array.from(files).filter(f => f.name.toLowerCase().endsWith('.pdf'));
+    if (!pdfFiles.length) { showResult('请选择PDF文件', true); return; }
+    selectedFiles = pdfFiles;
+    renderFileList();
     uploadBtn.disabled = false;
 }
 
+function renderFileList() {
+    if (!selectedFiles.length) { fileListEl.innerHTML = ''; return; }
+    fileListEl.innerHTML = '<div style="margin-bottom:6px;font-weight:600;color:#333;">已选择 ' + selectedFiles.length + ' 个文件：</div>' +
+        selectedFiles.map((f, i) => {
+            const sz = f.size > 1048576 ? (f.size/1048576).toFixed(1)+'MB' : (f.size/1024).toFixed(1)+'KB';
+            return `<div style="display:flex;align-items:center;gap:6px;padding:4px 0;">
+                <span style="color:#1890ff;font-weight:500;">[${i}]</span>
+                <span>${e(f.name)}</span>
+                <span style="color:#888;">(${sz})</span>
+                <span style="cursor:pointer;color:#ff4d4f;" onclick="removeFile(${i})">×</span>
+            </div>`;
+        }).join('');
+}
+
+function removeFile(index) {
+    selectedFiles.splice(index, 1);
+    renderFileList();
+    if (!selectedFiles.length) uploadBtn.disabled = true;
+}
+
 uploadBtn.onclick = async () => {
-    if (!selectedFile) return;
+    if (!selectedFiles.length) return;
     uploadBtn.disabled = true;
     uploadBtn.textContent = '上传中...';
+
     const fd = new FormData();
-    fd.append('file', selectedFile);
+    selectedFiles.forEach(f => fd.append('files', f));
+
+    // 构建关键字驱动的关系配置
+    const mainKey = document.getElementById('main-relation-key').value;
+    const mainValue = document.getElementById('main-relation-value').value;
+    if (mainKey && mainValue) {
+        const relations = {
+            main_key: mainKey,
+            main_value: mainValue,
+            sub_key: document.getElementById('sub-relation-key').value || null,
+            sub_value_pattern: document.getElementById('sub-relation-pattern').value || null
+        };
+        fd.append('relations', JSON.stringify(relations));
+    }
+
     try {
-        const res = await fetch(BASE + '/api/v1/upload', { method: 'POST', body: fd });
+        const res = await fetch(BASE + '/api/v1/upload/batch', { method: 'POST', body: fd });
         const data = await res.json();
-        if (data.doc_id) {
-            showResult(`上传成功，正在解析...`, false);
-            pollStatus(data.doc_id);
+        if (data.doc_ids && data.doc_ids.length) {
+            showResult(`成功上传 ${data.doc_ids.length} 个文件，正在后台解析...`, false);
+            selectedFiles = [];
+            renderFileList();
+            uploadBtn.disabled = true;
+            document.getElementById('main-relation-key').value = '';
+            document.getElementById('main-relation-value').value = '';
+            document.getElementById('sub-relation-key').value = '';
+            document.getElementById('sub-relation-pattern').value = '';
+            pollBatchStatus(data.doc_ids);
         } else {
             showResult(data.message || '上传失败', true);
         }
-    } catch (e) { showResult('请求失败: ' + e.message, true); }
-    uploadBtn.disabled = false;
-    uploadBtn.textContent = '上传并解析';
+    } catch (err) { showResult('请求失败: ' + err.message, true); }
+    uploadBtn.disabled = !selectedFiles.length;
+    uploadBtn.textContent = '批量上传并解析';
 };
+
+function pollBatchStatus(docIds) {
+    let c = 0;
+    const t = setInterval(async () => {
+        c++;
+        if (c > 120) { clearInterval(t); return; }
+        try {
+            let allDone = true;
+            for (const id of docIds) {
+                const res = await fetch(BASE + '/api/v1/status/' + id);
+                const d = await res.json();
+                if (d.status !== 'completed' && d.status !== 'failed') {
+                    allDone = false;
+                }
+            }
+            loadDocuments();
+            if (allDone) {
+                clearInterval(t);
+                showResult('所有文件解析完成！', false);
+            }
+        } catch { clearInterval(t); }
+    }, 3000);
+}
 
 function showResult(msg, isErr) {
     uploadResult.style.display = 'block';
     uploadResult.className = 'upload-result ' + (isErr ? 'err' : 'ok');
     uploadResult.textContent = msg;
-}
-
-function pollStatus(docId) {
-    let c = 0;
-    const t = setInterval(async () => {
-        c++;
-        if (c > 90) { clearInterval(t); return; }
-        try {
-            const res = await fetch(BASE + '/api/v1/status/' + docId);
-            const d = await res.json();
-            loadDocuments();
-            if (d.status === 'completed') {
-                clearInterval(t);
-                showResult('解析完成！', false);
-                // 跳转到详情页
-                window.location.href = 'detail.html?id=' + docId;
-            } else if (d.status === 'failed') {
-                clearInterval(t);
-                showResult('解析失败: ' + (d.message || '未知错误'), true);
-            }
-        } catch { clearInterval(t); }
-    }, 3000);
 }
 
 // 文档列表

@@ -34,6 +34,15 @@ public class PdfController {
         return ResponseEntity.ok(response);
     }
 
+    @PostMapping(value = "/upload/batch", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<Map<String, Object>> uploadBatch(
+        @RequestParam("files") List<MultipartFile> files,
+        @RequestParam(value = "relations", required = false) String relations
+    ) throws IOException {
+        Map<String, Object> response = pdfParserService.uploadBatch(files, relations);
+        return ResponseEntity.ok(response);
+    }
+
     @GetMapping("/status/{docId}")
     public ResponseEntity<ParseResponse> getStatus(@PathVariable Long docId) {
         ParseResponse response = pdfParserService.getStatus(docId);
@@ -91,5 +100,33 @@ public class PdfController {
     public ResponseEntity<Void> deleteDocument(@PathVariable Long docId) {
         pdfParserService.deleteDocument(docId);
         return ResponseEntity.ok().build();
+    }
+
+    // ==================== 关联关系管理 ====================
+
+    @GetMapping("/documents/{docId}/relations")
+    public ResponseEntity<List<Map<String, Object>>> getDocumentRelations(@PathVariable Long docId) {
+        return ResponseEntity.ok(pdfParserService.getDocumentRelations(docId));
+    }
+
+    @GetMapping("/documents/{docId}/related")
+    public ResponseEntity<List<Map<String, Object>>> getRelatedDocuments(@PathVariable Long docId) {
+        return ResponseEntity.ok(pdfParserService.getRelatedDocuments(docId));
+    }
+
+    @PostMapping("/relations")
+    public ResponseEntity<Map<String, Object>> createRelation(@RequestBody Map<String, Object> relation) {
+        return ResponseEntity.ok(pdfParserService.createRelation(relation));
+    }
+
+    @DeleteMapping("/relations/{relationId}")
+    public ResponseEntity<Void> deleteRelation(@PathVariable Long relationId) {
+        pdfParserService.deleteRelation(relationId);
+        return ResponseEntity.ok().build();
+    }
+
+    @PostMapping("/relations/auto-detect")
+    public ResponseEntity<Map<String, Object>> autoDetectRelations() {
+        return ResponseEntity.ok(pdfParserService.autoDetectRelations());
     }
 }
